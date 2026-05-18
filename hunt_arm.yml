@@ -1,1 +1,82 @@
+# Triggering automation - May 12
+name: OCI Capacity Hunt
+on:
+  schedule:
+    # Runs every 4 hours (at 15 mins past) to ensure coverage
+    - cron: '15 */4 * * *'  
+  workflow_dispatch: # Keeps manual button active
 
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install OCI CLI
+        run: |
+          # Fast and stable installation via pip
+          pip install oci-cli
+          # Verify it works
+          oci --version
+
+      - name: Configure OCI CLI
+        run: |
+          mkdir -p ~/.oci
+          echo "[DEFAULT]" > ~/.oci/config
+          echo "user=${{ secrets.OCI_USER_OCID }}" >> ~/.oci/config
+          echo "fingerprint=${{ secrets.OCI_FINGERPRINT }}" >> ~/.oci/config
+          echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
+          echo "region=${{ secrets.OCI_REGION }}" >> ~/.oci/config
+          echo "key_file=~/.oci/key.pem" >> ~/.oci/config
+          echo "${{ secrets.OCI_KEY_FILE }}" > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          
+      - name: Debug Variables
+        run: |
+          if [ -z "${{ secrets.OCI_SUBNET_ID }}" ]; then echo "❌ SUB Secret is MISSING"; else echo "✅ SUB Secret is FOUND"; fi
+          if [ -z "${{ secrets.OCI_TENANCY_OCID }}" ]; then echo "❌ TENANCY Secret is MISSING"; else echo "✅ TENANCY Secret is FOUND"; fi
+          
+      - name: Hunt for Instance
+        run: |
+          set +e
+          export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
+          
+          AD="ccSd:AP-MUMBAI-1-AD-1"
+          COMP="${{ secrets.OCI_TENANCY_OCID }}"
+          SUB="${{ secrets.OCI_SUBNET_ID }}"
+          IMG="${{ secrets.OCI_IMAGE_ID }}"
+          
+          # Hunt for 3.5 hours (12600 seconds)
+          end=$((SECONDS+12600)) 
+
+          
+          while [ $SECONDS -lt $end ]; do
+            echo "Attempting hunt at $(date)"
+            
+            RESPONSE=$(oci compute instance launch \
+              --availability-domain "$AD" \
+              --compartment-id "$COMP" \
+              --shape "VM.Standard.A1.Flex" \
+              --shape-config '{"memoryInGBs": 24, "ocpus": 4}' \
+              --subnet-id "$SUB" \
+              --image-id "$IMG" \
+              --assign-public-ip true \
+              --ssh-authorized-keys-file <(echo "${{ secrets.SSH_PUBLIC_KEY }}") 2>&1)
+            
+            if [[ "$RESPONSE" == *"PROVISIONING"* ]]; then
+              curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+                -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+                -d text="✅ OCI SUCCESS! Mumbai ARM Instance Created! 🚀"
+              echo "✅ SUCCESS!"
+              exit 0
+            # We now catch the 404 error as well and keep retrying
+            # We now wait between 3 and 5 minutes randomly
+            elif [[ "$RESPONSE" == *"Out of capacity"* || "$RESPONSE" == *"TooManyRequests"* || "$RESPONSE" == *"InternalError"* || "$RESPONSE" == *"LimitExceeded"* || "$RESPONSE" == *"NotAuthorizedOrNotFound"* ]]; then
+              RAND_SLEEP=$(( ( RANDOM % 120 ) + 180 ))
+              echo "❌ Slot not found or Capacity full. Retrying in $RAND_SLEEP seconds..."
+              sleep $RAND_SLEEP
+            else
+              echo "🚨 UNKNOWN CRITICAL ERROR: $RESPONSE"
+              exit 1
+            fi
+
+          done
