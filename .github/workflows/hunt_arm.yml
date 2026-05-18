@@ -1,11 +1,11 @@
-# Triggering automation - May 12
+# Triggering automation - Optimized for Frankfurt Free Tier Hunt
 name: OCI Capacity Hunt
 on:
   schedule:
-    # Runs every 4 hours (at 15 mins past) to ensure coverage
+    # Runs at 01:15 AM, 05:15 AM, 09:15 AM, 01:15 PM, 05:15 PM, 09:15 PM UTC
+    # Hits the target midnight/early-morning maintenance slots perfectly in Germany (CET)
     - cron: '15 */4 * * *'  
   workflow_dispatch: # Keeps manual button active
-
 
 jobs:
   hunt:
@@ -13,9 +13,7 @@ jobs:
     steps:
       - name: Install OCI CLI
         run: |
-          # Fast and stable installation via pip
           pip install oci-cli
-          # Verify it works
           oci --version
 
       - name: Configure OCI CLI
@@ -34,28 +32,34 @@ jobs:
         run: |
           if [ -z "${{ secrets.OCI_SUBNET_ID }}" ]; then echo "❌ SUB Secret is MISSING"; else echo "✅ SUB Secret is FOUND"; fi
           if [ -z "${{ secrets.OCI_TENANCY_OCID }}" ]; then echo "❌ TENANCY Secret is MISSING"; else echo "✅ TENANCY Secret is FOUND"; fi
+          if [ -z "${{ secrets.OCI_REGION }}" ]; then echo "❌ REGION Secret is MISSING"; else echo "✅ Target Region is set to: ${{ secrets.OCI_REGION }}"; fi
           
       - name: Hunt for Instance
-        env:
-          SUPPRESS_LABEL_WARNING: "True" # 1. Added here to completely silence the file permission warning
         run: |
           set +e
           export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
           
-          AD="ccSd:AP-MUMBAI-1-AD-1"
+          # 1. FIXED: Added all 3 Frankfurt Availability Domains into an array string
+          ADS=("eu-frankfurt-1-AD-1" "eu-frankfurt-1-AD-2" "eu-frankfurt-1-AD-3")
+          
           COMP="${{ secrets.OCI_TENANCY_OCID }}"
           SUB="${{ secrets.OCI_SUBNET_ID }}"
           IMG="${{ secrets.OCI_IMAGE_ID }}"
           
-          # Hunt for 3.5 hours (12600 seconds)
+          # Hunt for 3.5 hours (12600 seconds) to prevent GitHub runner timeouts
           end=$((SECONDS+12600)) 
-
+          
+          # Track index to cycle through the ADs array
+          ad_index=0
           
           while [ $SECONDS -lt $end ]; do
-            echo "Attempting hunt at $(date)"
+            # Pick current AD from the array
+            CURRENT_AD=${ADS[$ad_index]}
+            
+            echo "Attempting hunt in $CURRENT_AD at $(date)"
             
             RESPONSE=$(oci compute instance launch \
-              --availability-domain "$AD" \
+              --availability-domain "$CURRENT_AD" \
               --compartment-id "$COMP" \
               --shape "VM.Standard.A1.Flex" \
               --shape-config '{"memoryInGBs": 12, "ocpus": 2}' \
@@ -64,22 +68,24 @@ jobs:
               --assign-public-ip true \
               --ssh-authorized-keys-file <(echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}") 2>&1)
             
-            # 2. Oracle returns JSON data containing the text "ocid1.instance.oc1" upon a successful launch
-            if [[ "$RESPONSE" == *"PROVISIONING"* || "$RESPONSE" == *"ocid1.instance.oc1"* ]]; then
+            if [[ "$RESPONSE" == *"PROVISIONING"* ]]; then
               curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
                 -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-                -d text="✅ OCI SUCCESS! FRANKFURT ARM Instance Created! 🚀"
+                -d text="✅ OCI SUCCESS! Frankfurt ARM Instance Created in $CURRENT_AD! 🚀"
               echo "✅ SUCCESS!"
               exit 0
-            # We now catch the 404 error as well and keep retrying
-            # We now wait between 3 and 5 minutes randomly
-            elif [[ "$RESPONSE" == *"host capacity"* || "$RESPONSE" == *"TooManyRequests"* || "$RESPONSE" == *"429"* || "$RESPONSE" == *"InternalError"* || "$RESPONSE" == *"LimitExceeded"* || "$RESPONSE" == *"NotAuthorizedOrNotFound"* || "$RESPONSE" == *"timed out"* || "$RESPONSE" == *"connection"* ]]; then
-              RAND_SLEEP=$(( ( RANDOM % 120 ) + 180 ))
-              echo "❌ Slot not found or Capacity full. Retrying in $RAND_SLEEP seconds..."
+              
+            elif [[ "$RESPONSE" == *"Out of capacity"* || "$RESPONSE" == *"TooManyRequests"* || "$RESPONSE" == *"InternalError"* || "$RESPONSE" == *"LimitExceeded"* || "$RESPONSE" == *"NotAuthorizedOrNotFound"* ]]; then
+              # 2. FIXED: Valid random sleep calculation between 120 and 240 seconds (2 to 4 minutes)
+              RAND_SLEEP=$(( ( RANDOM % 121 ) + 120 ))
+              echo "❌ Slot unavailable in $CURRENT_AD ($RESPONSE). Retrying in $RAND_SLEEP seconds..."
+              
+              # 3. CRITICAL: Cycle to the next Availability Domain for the next attempt
+              ad_index=$(( (ad_index + 1) % 3 ))
+              
               sleep $RAND_SLEEP
             else
               echo "🚨 UNKNOWN CRITICAL ERROR: $RESPONSE"
               exit 1
             fi
-
           done
