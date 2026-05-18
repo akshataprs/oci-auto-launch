@@ -36,6 +36,8 @@ jobs:
           if [ -z "${{ secrets.OCI_TENANCY_OCID }}" ]; then echo "❌ TENANCY Secret is MISSING"; else echo "✅ TENANCY Secret is FOUND"; fi
           
       - name: Hunt for Instance
+        env:
+          SUPPRESS_LABEL_WARNING: "True" # 1. Added here to completely silence the file permission warning
         run: |
           set +e
           export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
@@ -62,7 +64,8 @@ jobs:
               --assign-public-ip true \
               --ssh-authorized-keys-file <(echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}") 2>&1)
             
-            if [[ "$RESPONSE" == *"PROVISIONING"* ]]; then
+            # 2. Oracle returns JSON data containing the text "ocid1.instance.oc1" upon a successful launch
+            if [[ "$RESPONSE" == *"PROVISIONING"* || "$RESPONSE" == *"ocid1.instance.oc1"* ]]; then
               curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
                 -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
                 -d text="✅ OCI SUCCESS! FRANKFURT ARM Instance Created! 🚀"
@@ -70,7 +73,7 @@ jobs:
               exit 0
             # We now catch the 404 error as well and keep retrying
             # We now wait between 3 and 5 minutes randomly
-            elif [[ "$RESPONSE" == *"Out of capacity"* || "$RESPONSE" == *"TooManyRequests"* || "$RESPONSE" == *"InternalError"* || "$RESPONSE" == *"LimitExceeded"* || "$RESPONSE" == *"NotAuthorizedOrNotFound"* ]]; then
+            elif [[ "$RESPONSE" == *"host capacity"* || "$RESPONSE" == *"TooManyRequests"* || "$RESPONSE" == *"429"* || "$RESPONSE" == *"InternalError"* || "$RESPONSE" == *"LimitExceeded"* || "$RESPONSE" == *"NotAuthorizedOrNotFound"* || "$RESPONSE" == *"timed out"* || "$RESPONSE" == *"connection"* ]]; then
               RAND_SLEEP=$(( ( RANDOM % 120 ) + 180 ))
               echo "❌ Slot not found or Capacity full. Retrying in $RAND_SLEEP seconds..."
               sleep $RAND_SLEEP
