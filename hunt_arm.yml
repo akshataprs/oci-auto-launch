@@ -56,16 +56,16 @@ jobs:
               --availability-domain "$AD" \
               --compartment-id "$COMP" \
               --shape "VM.Standard.A1.Flex" \
-              --shape-config '{"memoryInGBs": 24, "ocpus": 4}' \
+              --shape-config '{"memoryInGBs": 12, "ocpus": 2}' \
               --subnet-id "$SUB" \
               --image-id "$IMG" \
               --assign-public-ip true \
-              --ssh-authorized-keys-file <(echo "${{ secrets.SSH_PUBLIC_KEY }}") 2>&1)
+              --ssh-authorized-keys-file <(echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}") 2>&1)
             
             if [[ "$RESPONSE" == *"PROVISIONING"* ]]; then
               curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
                 -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-                -d text="✅ OCI SUCCESS! Mumbai ARM Instance Created! 🚀"
+                -d text="✅ OCI SUCCESS! FRANKFURT ARM Instance Created! 🚀"
               echo "✅ SUCCESS!"
               exit 0
             # We now catch the 404 error as well and keep retrying
