@@ -31,7 +31,7 @@ jobs:
       - name: Launch Instance (Capacity Hunt)
         run: |
           oci compute instance launch \
-            --availability-domain "${{ secrets.OCI_AD }}" \
+            --availability-domain "${{ secrets.OCI_REGION }}" \
             --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
             --shape "VM.Standard.A1.Flex" \
             --shape-config '{"ocpus": 2, "memoryInGBs": 12}' \
