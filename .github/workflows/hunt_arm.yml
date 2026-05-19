@@ -27,20 +27,6 @@ jobs:
           echo "key_file=~/.oci/key.pem" >> ~/.oci/config
           echo "${{ secrets.OCI_KEY_FILE }}" > ~/.oci/key.pem
           chmod 600 ~/.oci/key.pem
-            
-      - name: Launch Instance (Capacity Hunt)
-        run: |
-          oci compute instance launch \
-            --availability-domain "${{ secrets.OCI_REGION }}" \
-            --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
-            --shape "VM.Standard.A1.Flex" \
-            --shape-config '{"ocpus": 2, "memoryInGBs": 12}' \
-            --boot-volume-size-in-gbs 50 \
-            --image-id "${{ secrets.OCI_IMAGE_ID }}" \
-            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
-            --assign-public-ip true \
-            --display-name "WooCommerce-Prod"
-
           
       - name: Debug Variables
         run: |
@@ -74,6 +60,7 @@ jobs:
               --compartment-id "$COMP" \
               --shape "VM.Standard.A1.Flex" \
               --shape-config "{\"ocpus\":2,\"memoryInGBs\":12}" \
+              --boot-volume-size-in-gbs 50 \
               --subnet-id "$SUB" \
               --image-id "$IMG" \
               --assign-public-ip true \
