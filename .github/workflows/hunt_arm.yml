@@ -40,6 +40,7 @@ jobs:
           export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
           export SUPPRESS_LABEL_WARNING=True
           
+          # Real Availability Domain names for Frankfurt
           ADS=("eu-frankfurt-1-AD-1" "eu-frankfurt-1-AD-2" "eu-frankfurt-1-AD-3")
           
           COMP="${{ secrets.OCI_TENANCY_OCID }}"
@@ -54,7 +55,7 @@ jobs:
             
             echo "Attempting hunt in $CURRENT_AD at $(date)"
             
-            # FIXED: Properly escaped numerical JSON string pass-through
+            # FIXED: Properly escaped numerical JSON string pass-through & Explicit Boot Volume Size Included
             RESPONSE=$(oci compute instance launch \
               --availability-domain "$CURRENT_AD" \
               --compartment-id "$COMP" \
@@ -64,6 +65,7 @@ jobs:
               --subnet-id "$SUB" \
               --image-id "$IMG" \
               --assign-public-ip true \
+              --display-name "WooCommerce-Prod" \
               --ssh-authorized-keys-file <(echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}") 2>&1)
             
             if [[ "$RESPONSE" == *"PROVISIONING"* ]]; then
